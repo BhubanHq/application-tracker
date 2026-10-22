@@ -1,0 +1,40 @@
+import { test, before, after } from 'node:test';
+import assert from 'node:assert/strict';
+import request from 'supertest';
+import mongoose from 'mongoose';
+import { MongoMemoryServer } from 'mongodb-memory-server';
+import { app } from './app.js';
+import { isDue } from '../shared/application.js';
+let mongo;
+before(async () => { mongo = await MongoMemoryServer.create(); await mongoose.connect(mongo.getUri()); });
+after(async () => { await mongoose.disconnect(); if (mongo) await mongo.stop(); });
+test('create, list, update, and delete a persisted application', async () => {
+  const created = await request(app).post('/api/applications').send({company:'  Example  ',role:'Developer',status:'Applied',followUp:'2026-11-01'}).expect(201);
+  assert.equal(created.body.company,'Example');
+  const id = created.body._id;
+  const listed = await request(app).get('/api/applications').expect(200);
+  assert.ok(listed.body.some(item => item._id === id));
+  const updated = await request(app).put(`/api/applications/${id}`).send({company:'Example',role:'Developer',status:'Interview',followUp:''}).expect(200);
+  assert.equal(updated.body.status,'Interview');
+  assert.equal(updated.body.followUp,'');
+  const persisted = await request(app).get('/api/applications').expect(200);
+  assert.equal(persisted.body.find(item => item._id === id).status,'Interview');
+  await request(app).delete(`/api/applications/${id}`).expect(204);
+  const remaining = await request(app).get('/api/applications').expect(200);
+  assert.equal(remaining.body.some(item => item._id === id),false);
+  await request(app).delete(`/api/applications/${id}`).expect(404);
+  await request(app).put(`/api/applications/${id}`).send({company:'Example',role:'Developer'}).expect(404);
+});
+test('invalid inputs and unsafe links are rejected', async () => {
+  for (const values of [{company:'',role:'Dev'}, {company:'X',role:'Dev',status:'Unknown'}, {company:'X',role:'Dev',url:'javascript:alert(1)'}, {company:'X',role:'Dev',followUp:'2026-02-30'}, {company:{$ne:null},role:'Dev'}]) await request(app).post('/api/applications').send(values).expect(400);
+  await request(app).delete('/api/applications/not-an-id').expect(400);
+  await request(app).post('/api/applications').set('Content-Type','application/json').send('{').expect(400);
+  await request(app).get('/api/missing').expect(404);
+});
+test('follow-ups include today and overdue, excluding closed opportunities', () => {
+  assert.equal(isDue({status:'Applied',followUp:'2026-10-18'},'2026-10-18'),true);
+  assert.equal(isDue({status:'Interview',followUp:'2026-10-17'},'2026-10-18'),true);
+  for (const status of ['Offer','Rejected']) assert.equal(isDue({status,followUp:'2026-10-17'},'2026-10-18'),false);
+  assert.equal(isDue({status:'Saved',followUp:'2026-10-19'},'2026-10-18'),false);
+  assert.equal(isDue({status:'Saved',followUp:''},'2026-10-18'),false);
+});

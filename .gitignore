@@ -1,0 +1,22 @@
+# Dependencies and generated files
+node_modules/
+dist/
+coverage/
+*.log
+
+# Local settings and database files
+.env
+.env.*
+!.env.example
+.local-data/
+
+# Editor and agent files
+.vscode/
+.idea/
+.agents/
+.codex/
+.DS_Store
+Thumbs.db
+
+# Prepared upload copies
+/github-upload/
